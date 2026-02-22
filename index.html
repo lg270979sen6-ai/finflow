@@ -465,17 +465,12 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
             <span>●</span>&nbsp;Не подключено
           </div>
           <div class="firebase-steps" id="fbSteps">
-            Чтобы расходы синхронизировались между телефонами Богдана и Вики в реальном времени:
-            <br><br>
-            1. Зайдите на <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a><br>
-            2. Создайте проект → Realtime Database → Создать базу данных<br>
-            3. Правила: установите <code>".read": true, ".write": true</code><br>
-            4. Скопируйте URL базы данных (вида <code>https://…-default-rtdb.firebaseio.com</code>)<br>
-            5. Вставьте ниже:
+            База данных уже настроена и подключается автоматически. Оба пользователя работают с одной и той же базой.<br><br>
+            Если нужно подключить <strong>свою</strong> базу данных — замените URL ниже и нажмите «Подключить».
           </div>
           <div class="form-group">
             <label class="form-label">URL Firebase Realtime Database</label>
-            <input class="form-input" id="fbUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" style="font-size:12px">
+            <input class="form-input" id="fbUrl" placeholder="https://family-budget-32149-default-rtdb.europe-west1.firebasedatabase.app" style="font-size:12px">
           </div>
           <div class="form-group">
             <label class="form-label">Название комнаты (одинаковое у обоих пользователей)</label>
@@ -760,11 +755,13 @@ if(!Object.keys(budgets).length){
 //  FIREBASE SYNC
 // ════════════════════════════════════════
 function connectFirebase(){
-  const url=document.getElementById('fbUrl').value.trim();
-  const room=document.getElementById('fbRoom').value.trim()||'family-budget';
-  if(!url){showToast('❌ Введите URL базы данных');return;}
+  const url=(document.getElementById('fbUrl').value.trim()) || DEFAULT_FB_URL;
+  const room=(document.getElementById('fbRoom').value.trim()) || DEFAULT_FB_ROOM;
   if(!url.startsWith('https://')){showToast('❌ URL должен начинаться с https://');return;}
-  cfg.fbUrl=url; cfg.fbRoom=room; saveCfg();
+  // Save only if differs from default (keep cfg clean)
+  if(url !== DEFAULT_FB_URL || room !== DEFAULT_FB_ROOM){
+    cfg.fbUrl=url; cfg.fbRoom=room; saveCfg();
+  }
   setSyncStatus('syncing','Подключение...');
   try{initFirebase(url,room);}catch(e){showToast('❌ '+e.message);setSyncStatus('offline','Ошибка: '+e.message);}
 }
@@ -891,16 +888,20 @@ function disconnectFirebase(){
   showToast('🔌 Синхронизация отключена');
 }
 
-// Auto-connect on load if saved config
-if(cfg.fbUrl){
-  document.getElementById('fbUrl').value = cfg.fbUrl;
-  document.getElementById('fbRoom').value = cfg.fbRoom||'family-budget';
-  setTimeout(()=>{
-    try{initFirebase(cfg.fbUrl, cfg.fbRoom||'family-budget');}catch(e){
-      setSyncStatus('offline','Ошибка авто-подключения: '+e.message);
-    }
-  }, 1000);
-}
+// Default Firebase config (can be changed in Settings)
+const DEFAULT_FB_URL  = 'https://family-budget-32149-default-rtdb.europe-west1.firebasedatabase.app';
+const DEFAULT_FB_ROOM = 'family-budget';
+
+// Auto-connect: use saved config or default
+const fbUrlToUse  = cfg.fbUrl  || DEFAULT_FB_URL;
+const fbRoomToUse = cfg.fbRoom || DEFAULT_FB_ROOM;
+document.getElementById('fbUrl').value  = fbUrlToUse;
+document.getElementById('fbRoom').value = fbRoomToUse;
+setTimeout(()=>{
+  try{initFirebase(fbUrlToUse, fbRoomToUse);}catch(e){
+    setSyncStatus('offline','Ошибка авто-подключения: '+e.message);
+  }
+}, 1000);
 
 // ════════════════════════════════════════
 //  PERSISTENCE
@@ -1334,15 +1335,15 @@ function renderSettingsUI(){
   renderCatColorList();
   renderUserSettings();
   buildSidebarCats();
-  // Restore firebase UI
-  if(cfg.fbUrl){
-    document.getElementById('fbUrl').value=cfg.fbUrl;
-    document.getElementById('fbRoom').value=cfg.fbRoom||'family-budget';
-    if(fbConnected){
-      document.getElementById('fbStatus').className='firebase-status connected';
-      document.getElementById('fbStatus').innerHTML='<span>●</span>&nbsp;Подключено к '+(cfg.fbRoom||'family-budget');
-      document.getElementById('btnDisconnect').style.display='block';
-    }
+  // Restore firebase UI — always show current URL
+  const shownUrl  = cfg.fbUrl  || DEFAULT_FB_URL;
+  const shownRoom = cfg.fbRoom || DEFAULT_FB_ROOM;
+  document.getElementById('fbUrl').value  = shownUrl;
+  document.getElementById('fbRoom').value = shownRoom;
+  if(fbConnected){
+    document.getElementById('fbStatus').className='firebase-status connected';
+    document.getElementById('fbStatus').innerHTML='<span>●</span>&nbsp;Подключено · ' + shownRoom;
+    document.getElementById('btnDisconnect').style.display='block';
   }
 }
 
