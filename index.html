@@ -792,14 +792,15 @@ function initFirebase(url, room){
   fbRef.on('value', (snap) => {
     const data = snap.val();
     if(data){
-      // Merge remote + local
+      _receivingRemote = true; // prevent echo-loop
+      // Remote is source of truth — use it directly (not merge)
       const remoteExps = data.expenses ? Object.values(data.expenses) : [];
       const remoteBud  = data.budgets  || {};
       const remoteCfg  = data.cfg      || {};
 
-      // Use remote data as source of truth, merge carefully
-      allExpenses = mergeExpenses(allExpenses, remoteExps);
-      if(Object.keys(remoteBud).length) budgets = {...budgets, ...remoteBud};
+      // Remote IS the source of truth — replace local completely
+      allExpenses = remoteExps;
+      if(Object.keys(remoteBud).length) budgets = remoteBud;
       // Merge cfg (only user settings and cats from remote)
       if(remoteCfg.users)      { cfg.users=remoteCfg.users; Object.entries(remoteCfg.users).forEach(([uid,d])=>{if(USERS[uid]){if(d.name)USERS[uid].name=d.name;if(d.color)USERS[uid].color=d.color;}}); }
       if(remoteCfg.customCats) { cfg.customCats=remoteCfg.customCats; Object.entries(remoteCfg.customCats).forEach(([n,d])=>{if(!CATS[n])CATS[n]={...d,builtin:false};}); }
@@ -807,8 +808,11 @@ function initFirebase(url, room){
       document.documentElement.style.setProperty('--u1',USERS.bogdan.color);
       document.documentElement.style.setProperty('--u2',USERS.vika.color);
 
-      save(); saveBud(); saveCfg();
+      store.set('ff_exp', JSON.stringify(allExpenses));
+      store.set('ff_bud', JSON.stringify(budgets));
+      store.set('ff_cfg', JSON.stringify(cfg));
       renderAll();
+      _receivingRemote = false; // done processing remote data
     }
     fbConnected = true;
     setSyncStatus('online','Синхронизировано ✓');
@@ -824,8 +828,8 @@ function initFirebase(url, room){
   fbDb.ref('.info/connected').on('value', snap => {
     if(snap.val()){
       setSyncStatus('online','Online — данные синхронизируются');
-      // Push local data on first connect
-      pushToFirebase();
+      // Only push local data if Firebase is empty (avoid overwriting remote on reconnect)
+      pushToFirebaseIfEmpty();
     } else {
       setSyncStatus('offline','Нет соединения — работаем локально');
     }
@@ -845,15 +849,26 @@ function mergeExpenses(local, remote){
 function pushToFirebase(){
   if(!fbRef || !fbConnected) return;
   const expsObj = {};
-  allExpenses.forEach(e => { expsObj[e.id.toString().replace('.','_')] = e; });
-  fbRef.update({
-    expenses: expsObj,
-    budgets:  budgets,
-    cfg:      {users:cfg.users||{}, customCats:cfg.customCats||{}, catColors:cfg.catColors||{}}
-  }).then(()=>{
-    setSyncStatus('online','Синхронизировано ✓');
-  }).catch(e=>{
+  allExpenses.forEach(e => { expsObj[e.id.toString().replace(/\./g,'_')] = e; });
+  // Use set() for expenses so deletions propagate (update() only merges, never deletes)
+  fbRef.child('expenses').set(expsObj).catch(e=>{
     setSyncStatus('offline','Ошибка записи: ' + e.message);
+  });
+  fbRef.child('budgets').set(budgets);
+  fbRef.child('cfg').set({users:cfg.users||{}, customCats:cfg.customCats||{}, catColors:cfg.catColors||{}});
+}
+
+let _firstConnect = true;
+function pushToFirebaseIfEmpty(){
+  // On first connect: only push if Firebase has no expenses yet
+  if(!fbRef || !fbConnected) return;
+  fbRef.child('expenses').once('value').then(snap=>{
+    if(!snap.val()) {
+      // Firebase empty — push local data
+      pushToFirebase();
+    }
+    // else: Firebase has data, it will come via the listener — don't overwrite
+    _firstConnect = false;
   });
 }
 
@@ -890,9 +905,10 @@ if(cfg.fbUrl){
 // ════════════════════════════════════════
 //  PERSISTENCE
 // ════════════════════════════════════════
-function save()   { store.set('ff_exp', JSON.stringify(allExpenses)); if(fbConnected) pushToFirebase(); }
-function saveBud(){ store.set('ff_bud', JSON.stringify(budgets)); if(fbConnected) pushToFirebase(); }
-function saveCfg(){ store.set('ff_cfg', JSON.stringify(cfg)); if(fbConnected) pushToFirebase(); }
+let _receivingRemote = false; // flag to avoid echo-loop when receiving Firebase data
+function save()   { store.set('ff_exp', JSON.stringify(allExpenses)); if(fbConnected && !_receivingRemote) pushToFirebase(); }
+function saveBud(){ store.set('ff_bud', JSON.stringify(budgets)); if(fbConnected && !_receivingRemote) pushToFirebase(); }
+function saveCfg(){ store.set('ff_cfg', JSON.stringify(cfg)); }
 function fmt(n)   { return Number(n).toLocaleString('ru-RU') + '\u00A0' + currency; }
 
 function showToast(msg){
