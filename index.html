@@ -9,12 +9,10 @@
 <title>FinFlow</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<!-- Firebase (optional — loaded only when user configures it) -->
-<script>
-// Firebase stub — real SDK loaded lazily when user connects
-window._fbLoaded = false;
-window.firebase = window.firebase || null;
-</script>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<script>window._fbLoaded = true;</script>
 <style>
 :root {
   --bg:#0d0f14;--surface:#161a22;--surface2:#1e2330;--surface3:#252d3d;
@@ -767,32 +765,23 @@ function connectFirebase(){
   if(!url){showToast('❌ Введите URL базы данных');return;}
   if(!url.startsWith('https://')){showToast('❌ URL должен начинаться с https://');return;}
   cfg.fbUrl=url; cfg.fbRoom=room; saveCfg();
-  setSyncStatus('syncing','Загрузка Firebase SDK...');
-  loadFirebaseSDK(()=>{ try{initFirebase(url,room);}catch(e){showToast('❌ '+e.message);setSyncStatus('offline','Ошибка: '+e.message);} });
-}
-
-function loadFirebaseSDK(cb){
-  if(window._fbLoaded && window.firebase && typeof firebase.database==='function'){cb();return;}
-  function loadScript(src, next){
-    var s=document.createElement('script');
-    s.src=src;
-    s.onload=next;
-    s.onerror=function(){showToast('❌ Не удалось загрузить Firebase. Нужен интернет.');setSyncStatus('offline','Ошибка загрузки SDK');};
-    document.head.appendChild(s);
-  }
-  loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js', function(){
-    loadScript('https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js', function(){
-      window._fbLoaded=true;
-      cb();
-    });
-  });
+  setSyncStatus('syncing','Подключение...');
+  try{initFirebase(url,room);}catch(e){showToast('❌ '+e.message);setSyncStatus('offline','Ошибка: '+e.message);}
 }
 
 function initFirebase(url, room){
-  if(!window.firebase){showToast('❌ Firebase SDK не загружен');return;}
-  try{firebase.apps.forEach(a=>a.delete());}catch(e){}
+  if(!window.firebase || typeof firebase.initializeApp !== 'function'){
+    showToast('❌ Firebase SDK не загружен. Проверьте интернет-соединение.');
+    setSyncStatus('offline','SDK не загружен');
+    return;
+  }
+  // Delete existing apps
+  try{
+    firebase.apps.slice().forEach(a=>{try{a.delete();}catch(e){}});
+  }catch(e){}
   const fbCfg = {databaseURL: url};
-  fbApp = firebase.initializeApp(fbCfg);
+  try{ fbApp = firebase.initializeApp(fbCfg); }
+  catch(e){ fbApp = firebase.app(); }
   fbDb = firebase.database();
   fbRoom = room;
   fbRef = fbDb.ref('finflow/' + room);
@@ -892,12 +881,10 @@ if(cfg.fbUrl){
   document.getElementById('fbUrl').value = cfg.fbUrl;
   document.getElementById('fbRoom').value = cfg.fbRoom||'family-budget';
   setTimeout(()=>{
-    loadFirebaseSDK(()=>{
-      try{initFirebase(cfg.fbUrl, cfg.fbRoom||'family-budget');}catch(e){
-        setSyncStatus('offline','Ошибка авто-подключения: '+e.message);
-      }
-    });
-  }, 1200);
+    try{initFirebase(cfg.fbUrl, cfg.fbRoom||'family-budget');}catch(e){
+      setSyncStatus('offline','Ошибка авто-подключения: '+e.message);
+    }
+  }, 1000);
 }
 
 // ════════════════════════════════════════
